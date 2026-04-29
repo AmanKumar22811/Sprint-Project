@@ -19,8 +19,8 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 @Configuration
 public class RepositoryConfig implements RepositoryRestConfigurer {
 
-    @Autowired
-    private Validator validator;
+	@Autowired
+	private Validator validator;
 
     @Override
     public void configureRepositoryRestConfiguration(RepositoryRestConfiguration config, CorsRegistry cors) {
