@@ -1,16 +1,10 @@
 package com.classicmodel.entity;
 
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import java.util.ArrayList;
 import java.util.List;
-
-import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-
-
 
 @Entity
 @Table(name = "productlines")
@@ -56,4 +50,3 @@ public class ProductLine {
         return "ProductLine{productLine='" + productLine + "'}";
     }
 }
-
