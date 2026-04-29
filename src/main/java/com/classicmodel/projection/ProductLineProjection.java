@@ -10,4 +10,3 @@ public interface ProductLineProjection {
     String getHtmlDescription();
     String getImageUrl();
 }
-
