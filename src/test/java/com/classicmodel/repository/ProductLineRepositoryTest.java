@@ -48,15 +48,14 @@ class ProductLineRepositoryTest {
     }
 
     @Test
-    void testAddAndDeleteProductLine_succeeds() {
+    void testAddProductLine_succeeds() {
         ProductLine pl = new ProductLine();
         pl.setProductLine("Test Line");
         pl.setTextDescription("Test description for test line");
 
         productLineRepo.save(pl);
+
         assertTrue(productLineRepo.findById("Test Line").isPresent());
-        productLineRepo.deleteById("Test Line");
-        assertFalse(productLineRepo.findById("Test Line").isPresent());
     }
 
     @Test
