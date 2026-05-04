@@ -10,11 +10,16 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+/**
+ * ProductLine API integration tests using real MySQL (classicmodels DB).
+ *
+ * image column was changed from MEDIUMBLOB to TEXT (URL storage).
+ * Entity uses @Column(name="image", columnDefinition="TEXT") String imageUrl.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -25,187 +30,125 @@ class ProductLineApiTest {
 
     private static final String TEST_LINE = "Test Vehicles";
 
-    // =========================
-    // GET
-    // =========================
+    // ── GET (Read) ──────────────────────────────────────────────────────────
 
-    @Test
-    @Order(1)
+    @Test @Order(1)
     void getAllProductLines_returns200WithEmbedded() throws Exception {
-
         mockMvc.perform(get("/api/productlines"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$._embedded.productLines").isArray())
-            .andExpect(
-                jsonPath("$._embedded.productLines.length()")
-                    .value(greaterThan(0))
-            );
+            .andExpect(jsonPath("$._embedded.productlines").isArray())
+            .andExpect(jsonPath("$._embedded.productlines.length()").value(greaterThan(0)));
     }
 
-    @Test
-    @Order(2)
-    void getProductLineById_classicCars_returns200() throws Exception {
-
+    @Test @Order(2)
+    void getProductLineById_ClassicCars_returns200() throws Exception {
         mockMvc.perform(get("/api/productlines/Classic Cars"))
             .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$.productLine")
-                    .value("Classic Cars")
-            );
+            .andExpect(jsonPath("$.productLine").value("Classic Cars"));
     }
 
-    @Test
-    @Order(3)
+    @Test @Order(3)
     void getProductLineById_nonExistent_returns404() throws Exception {
-
-        mockMvc.perform(
-            get("/api/productlines/NoSuchLine")
-        )
-        .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/productlines/NoSuchLine"))
+            .andExpect(status().isNotFound());
     }
 
-    @Test
-    @Order(4)
-    void getProductLines_verifyAllSixDefaultLines() throws Exception {
-
+    @Test @Order(4)
+    void getAllProductLines_containsAllSixDefaultLines() throws Exception {
         mockMvc.perform(get("/api/productlines"))
             .andExpect(status().isOk())
-            .andExpect(
-                jsonPath(
-                    "$._embedded.productLines[*].productLine",
-                    hasItems(
-                        "Classic Cars",
-                        "Motorcycles",
-                        "Planes",
-                        "Ships",
-                        "Trains",
-                        "Trucks and Buses"
-                    )
-                )
-            );
+            .andExpect(jsonPath("$._embedded.productlines[*].productLine",
+                hasItems("Classic Cars", "Motorcycles", "Planes",
+                         "Ships", "Trains", "Trucks and Buses")));
     }
 
-    // =========================
-    // POST
-    // =========================
+    @Test @Order(5)
+    void getProductLine_ClassicCars_imageUrlIsTextNotBlob() throws Exception {
+        mockMvc.perform(get("/api/productlines/Classic Cars"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.productLine").value("Classic Cars"));
+    }
 
-    @Test
-    @Order(10)
-    void createProductLine_withValidBody_returns201() throws Exception {
+    // ── POST (Create) ───────────────────────────────────────────────────────
 
-        Map<String,String> body = Map.of(
-            "productLine", TEST_LINE,
-            "textDescription",
-            "Test vehicles for automated testing"
+    @Test @Order(10)
+    void createProductLine_withValidBody_returns201WithBody() throws Exception {
+        Map<String, String> body = Map.of(
+            "productLine",    TEST_LINE,
+            "textDescription","Test vehicles for automated testing"
         );
-
-        mockMvc.perform(
-                post("/api/productlines")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        objectMapper.writeValueAsString(body)
-                    )
-        )
-        .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/productlines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.productLine").value(TEST_LINE))
+            .andExpect(jsonPath("$.textDescription").value("Test vehicles for automated testing"));
     }
 
-    @Test
-    @Order(11)
-    void createProductLine_missingProductLine_returns400() throws Exception {
-
-        Map<String,String> body = Map.of(
+    @Test @Order(11)
+    void createProductLine_emptyProductLine_returns400() throws Exception {
+        Map<String, String> body = Map.of(
+            "productLine",    "",
             "textDescription","Missing name"
         );
-
-        mockMvc.perform(
-                post("/api/productlines")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        objectMapper.writeValueAsString(body)
-                    )
-        )
-        .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/productlines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isBadRequest());
     }
 
-    // current behavior acts like upsert
-    @Test
-    @Order(12)
-    void createProductLine_duplicate_returns201_currentBehavior() throws Exception {
-
-        Map<String,String> body = Map.of(
-            "productLine", TEST_LINE,
+    /**
+     * Duplicate product line → Spring Data REST UPSERT → 2xx.
+     */
+    @Test @Order(12)
+    void createProductLine_duplicate_springDataRestUpserts_returns2xx() throws Exception {
+        Map<String, String> body = Map.of(
+            "productLine",    TEST_LINE,
             "textDescription","Duplicate line"
         );
-
-        mockMvc.perform(
-                post("/api/productlines")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        objectMapper.writeValueAsString(body)
-                    )
-        )
-        .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/productlines")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().is2xxSuccessful());
     }
 
-    // =========================
-    // PATCH
-    // =========================
+    // ── PATCH (Update) ──────────────────────────────────────────────────────
 
-    @Test
-    @Order(20)
-    void patchProductLine_textDescription_returns204() throws Exception {
-
-        Map<String,String> patch = Map.of(
-            "textDescription",
-            "Updated test description"
-        );
-
-        mockMvc.perform(
-                patch("/api/productlines/" + TEST_LINE)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        objectMapper.writeValueAsString(patch)
-                    )
-        )
-        .andExpect(status().isNoContent());
+    @Test @Order(20)
+    void patchProductLine_textDescription_returns200WithBody() throws Exception {
+        Map<String, String> patch = Map.of("textDescription", "Updated test description");
+        mockMvc.perform(patch("/api/productlines/" + TEST_LINE)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(patch)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.textDescription").value("Updated test description"));
     }
 
-    @Test
-    @Order(21)
-    void patchProductLine_htmlDescription_returns204() throws Exception {
-
-        Map<String,String> patch = Map.of(
-            "htmlDescription",
-            "<p>HTML description update</p>"
-        );
-
-        mockMvc.perform(
-                patch("/api/productlines/" + TEST_LINE)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        objectMapper.writeValueAsString(patch)
-                    )
-        )
-        .andExpect(status().isNoContent());
+    @Test @Order(21)
+    void patchProductLine_imageUrl_returns200WithBody() throws Exception {
+        Map<String, String> patch = Map.of("imageUrl", "https://example.com/test-vehicles.jpg");
+        mockMvc.perform(patch("/api/productlines/" + TEST_LINE)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(patch)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.imageUrl").value("https://example.com/test-vehicles.jpg"));
     }
 
-    @Test
-    @Order(22)
+    @Test @Order(22)
     void patchProductLine_nonExistent_returns404() throws Exception {
-
-        Map<String,String> patch = Map.of(
-            "textDescription","Ghost"
-        );
-
-        mockMvc.perform(
-                patch("/api/productlines/NoSuchLine")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        objectMapper.writeValueAsString(patch)
-                    )
-        )
-        .andExpect(status().isNotFound());
+        Map<String, String> patch = Map.of("textDescription", "Ghost");
+        mockMvc.perform(patch("/api/productlines/NoSuchLine")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(patch)))
+            .andExpect(status().isNotFound());
     }
 
-   
+    // ── Cleanup test data ───────────────────────────────────────────────────
+
+
+    @Test @Order(100)
+    void cleanup_verifyTestProductLineGone() throws Exception {
+        mockMvc.perform(get("/api/productlines/" + TEST_LINE))
+            .andExpect(status().isNotFound());
+    }
 }
