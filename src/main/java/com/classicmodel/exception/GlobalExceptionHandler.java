@@ -1,170 +1,162 @@
 package com.classicmodel.exception;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
-
+import org.springframework.core.Ordered;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.rest.core.RepositoryConstraintViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.ModelAndView;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
-@RestControllerAdvice
-public class GlobalExceptionHandler {
+/**
+ * Centralized exception handler for the Classic Models REST API.
+ *
+ * WHY HandlerExceptionResolver instead of @RestControllerAdvice:
+ *   Spring Data REST registers its own RepositoryRestHandlerExceptionResolver
+ *   at order 0. The standard ExceptionHandlerExceptionResolver (which backs
+ *   @RestControllerAdvice) runs at order 1 — AFTER Spring Data REST's resolver
+ *   has already swallowed the exception and returned a stack trace or bare 404.
+ *
+ *   By implementing HandlerExceptionResolver with Ordered.HIGHEST_PRECEDENCE
+ *   our handler is guaranteed to run FIRST, before Spring Data REST's resolver
+ *   can intercept any exception.
+ *
+ * WHAT THIS HANDLES:
+ *   GET /api/orders/99999  → ResourceNotFoundException (Spring Data REST) → 404 JSON
+ *   POST with bad data     → BadRequestException from @HandleBeforeCreate  → 400 JSON
+ *   POST with missing FK   → EmployeeNotFoundException etc. from EventHandler → 404 JSON
+ *   Duplicate key inserts  → DataIntegrityViolationException               → 409 JSON
+ *   Unknown exceptions     → returns null, delegated to next resolver
+ */
+@Component
+public class GlobalExceptionHandler implements HandlerExceptionResolver, Ordered {
 
-    // Your custom not found exception
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ApiError> handleResourceNotFound(
-            ResourceNotFoundException ex,
-            HttpServletRequest req) {
+    private final ObjectMapper objectMapper;
 
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.NOT_FOUND.value(),
-                "Not Found",
-                ex.getMessage(),
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    public GlobalExceptionHandler(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
     }
 
-    // IMPORTANT: Spring Data REST missing entity exception (this fixes your 500 -> 404 issue)
-    @ExceptionHandler(org.springframework.data.rest.webmvc.ResourceNotFoundException.class)
-    public ResponseEntity<ApiError> handleSpringDataRestNotFound(
-            org.springframework.data.rest.webmvc.ResourceNotFoundException ex,
-            HttpServletRequest req) {
-
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.NOT_FOUND.value(),
-                "Not Found",
-                "Resource not found",
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    @Override
+    public int getOrder() {
+        return Ordered.HIGHEST_PRECEDENCE;
     }
 
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<ApiError> handleBadRequest(
-            BadRequestException ex,
-            HttpServletRequest req) {
+    @Override
+    public ModelAndView resolveException(HttpServletRequest request,
+                                         HttpServletResponse response,
+                                         Object handler,
+                                         Exception ex) {
+        HttpStatus status;
+        String message;
 
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
-                ex.getMessage(),
-                req.getRequestURI()
-        );
+        // ── 404 Not Found ─────────────────────────────────────────────────────
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        if (ex instanceof EntityNotFoundException) {
+            status = HttpStatus.NOT_FOUND;
+            message = ex.getMessage();
+        }
+        else if (ex instanceof org.springframework.data.rest.webmvc.ResourceNotFoundException) {
+            status = HttpStatus.NOT_FOUND;
+            message = buildNotFoundMessage(request.getRequestURI());
+        }
+        else if (ex instanceof ResourceNotFoundException) {
+            status = HttpStatus.NOT_FOUND;
+            message = ex.getMessage();
+        }
+
+        // ── 400 Bad Request ───────────────────────────────────────────────────
+
+        else if (ex instanceof BadRequestException) {
+            status = HttpStatus.BAD_REQUEST;
+            message = ex.getMessage();
+        }
+        else if (ex instanceof ConstraintViolationException cve) {
+            status = HttpStatus.BAD_REQUEST;
+            message = "Validation failed: " + cve.getConstraintViolations().stream()
+                    .map(v -> v.getPropertyPath() + " " + v.getMessage())
+                    .collect(Collectors.joining("; "));
+        }
+        else if (ex instanceof RepositoryConstraintViolationException rcve) {
+            status = HttpStatus.BAD_REQUEST;
+            message = "Validation failed: " + rcve.getErrors().getAllErrors().stream()
+                    .map(e -> e.getDefaultMessage())
+                    .collect(Collectors.joining("; "));
+        }
+        else if (ex instanceof NumberFormatException || ex instanceof IllegalArgumentException) {
+            status = HttpStatus.BAD_REQUEST;
+            message = "Invalid value in request — " + ex.getMessage();
+        }
+
+        // ── 409 Conflict ──────────────────────────────────────────────────────
+
+        else if (ex instanceof DataIntegrityViolationException dive) {
+            status = HttpStatus.CONFLICT;
+            String cause = dive.getMostSpecificCause().getMessage();
+            if (cause != null && cause.contains("Duplicate entry")) {
+                message = "Duplicate key: a record with this ID already exists.";
+            } else if (cause != null && (cause.contains("foreign key") || cause.contains("FOREIGN KEY"))) {
+                message = "Foreign key violation: the referenced record does not exist.";
+            } else {
+                message = "Data integrity violation — please check your input values.";
+            }
+        }
+
+        // ── Unknown — let Spring Data REST / Spring MVC handle it ─────────────
+
+        else {
+            return null;
+        }
+
+        writeJson(response, status, message, request.getRequestURI());
+        return new ModelAndView();
     }
 
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ApiError> handleDataIntegrityViolation(
-            DataIntegrityViolationException ex,
-            HttpServletRequest req) {
+    // ── Private Helpers ───────────────────────────────────────────────────────
 
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.CONFLICT.value(),
-                "Conflict",
-                "Data integrity violation: duplicate key or constraint violation",
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    private String buildNotFoundMessage(String uri) {
+        if (uri == null) return "Resource not found";
+        String path = uri.contains("?") ? uri.substring(0, uri.indexOf('?')) : uri;
+        String[] parts = path.split("/");
+        if (parts.length >= 2) {
+            String resourceRaw = parts[parts.length - 2];
+            String id          = parts[parts.length - 1];
+            String resourceName = resourceRaw.isEmpty() ? "Resource"
+                    : Character.toUpperCase(resourceRaw.charAt(0))
+                      + (resourceRaw.length() > 1 && resourceRaw.endsWith("s")
+                         ? resourceRaw.substring(1, resourceRaw.length() - 1)
+                         : resourceRaw.substring(1));
+            return resourceName + " not found with id: " + id;
+        }
+        return "Resource not found: " + uri;
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> handleMethodArgumentNotValid(
-            MethodArgumentNotValidException ex,
-            HttpServletRequest req) {
-
-        String message = "Validation failed: " +
-                ex.getBindingResult()
-                  .getFieldErrors()
-                  .stream()
-                  .map(fe -> fe.getField() + " " + fe.getDefaultMessage())
-                  .collect(Collectors.joining(", "));
-
+    private void writeJson(HttpServletResponse response,
+                           HttpStatus status,
+                           String message,
+                           String path) {
         ApiError error = new ApiError(
                 LocalDateTime.now().toString(),
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
+                status.value(),
+                status.getReasonPhrase(),
                 message,
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
-    }
-
-    @ExceptionHandler(ConstraintViolationException.class)
-    public ResponseEntity<ApiError> handleConstraintViolation(
-            ConstraintViolationException ex,
-            HttpServletRequest req) {
-
-        String message = "Validation failed: " +
-                ex.getConstraintViolations()
-                  .stream()
-                  .map(v -> v.getPropertyPath() + " " + v.getMessage())
-                  .collect(Collectors.joining(", "));
-
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
-                message,
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
-    }
-
-    @ExceptionHandler(RepositoryConstraintViolationException.class)
-    public ResponseEntity<ApiError> handleRepositoryConstraintViolation(
-            RepositoryConstraintViolationException ex,
-            HttpServletRequest req) {
-
-        String message = "Validation failed: " +
-                ex.getErrors()
-                  .getAllErrors()
-                  .stream()
-                  .map(e -> e.getDefaultMessage())
-                  .collect(Collectors.joining(", "));
-
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
-                message,
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
-    }
-
-    // KEEP LAST
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handleGeneral(
-            Exception ex,
-            HttpServletRequest req) {
-
-        ApiError error = new ApiError(
-                LocalDateTime.now().toString(),
-                HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                "Internal Server Error",
-                ex.getMessage(),
-                req.getRequestURI()
-        );
-
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+                path);
+        try {
+            response.setStatus(status.value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
+            objectMapper.writeValue(response.getWriter(), error);
+            response.getWriter().flush();
+        } catch (IOException ignored) {
+        }
     }
 }
