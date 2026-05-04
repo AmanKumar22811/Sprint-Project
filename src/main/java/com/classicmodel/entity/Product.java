@@ -12,7 +12,7 @@ import java.util.List;
 @Table(name = "products")
 public class Product {
 
-    @Id
+    @Id 
     @Column(name = "productCode")
     @NotBlank
     private String productCode;
