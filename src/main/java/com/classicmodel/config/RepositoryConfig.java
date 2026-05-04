@@ -35,7 +35,7 @@ public class RepositoryConfig implements RepositoryRestConfigurer {
             Product.class
         );
 
-        // 🔥 CRITICAL FIX (this was missing)
+        
         config.setReturnBodyOnCreate(true);
         config.setReturnBodyOnUpdate(true);
 
