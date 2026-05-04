@@ -16,10 +16,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * ProductLine API integration tests (Spring Data REST - HAL format)
- * ProductLine API integration tests using real MySQL (classicmodels DB).
- *
- * image column was changed from MEDIUMBLOB to TEXT (URL storage).
- * Entity uses @Column(name="image", columnDefinition="TEXT") String imageUrl.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
