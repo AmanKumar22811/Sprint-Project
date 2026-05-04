@@ -151,4 +151,10 @@ class OfficeApiTest {
             .content(objectMapper.writeValueAsString(patch)))
             .andExpect(status().isNotFound());
     }
+
+    @Test @Order(99)
+    void cleanup_deleteTestOffice() throws Exception {
+        mockMvc.perform(delete("/api/offices/" + TEST_CODE))
+            .andExpect(status().is2xxSuccessful());
+    }
 }
