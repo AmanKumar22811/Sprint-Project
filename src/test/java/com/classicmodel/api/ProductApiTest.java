@@ -1,7 +1,7 @@
 package com.classicmodel.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -10,95 +10,104 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
-import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+/**
+ * Product API integration tests using real MySQL (classicmodels DB).
+ * PATCH returns 200 with body because return-body-on-update=true.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ProductApiTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Autowired MockMvc mockMvc;
+    @Autowired ObjectMapper objectMapper;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    // ── GET (Read) ──────────────────────────────────────────────────────────
 
-    @Test
-    void testGetAllProducts_returns200() throws Exception {
+    @Test @Order(1)
+    void getAllProducts_returns200WithEmbedded() throws Exception {
         mockMvc.perform(get("/api/products"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$._embedded.products").isArray())
             .andExpect(jsonPath("$._embedded.products.length()").value(greaterThan(0)));
     }
 
-    @Test
-    void testGetProductById_whenExists_returns200() throws Exception {
+    @Test @Order(2)
+    void getProductById_whenExists_returns200() throws Exception {
         mockMvc.perform(get("/api/products/S18_1749"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.productCode").value("S18_1749"));
     }
 
-    @Test
-    void testGetProductById_whenNotExists_returns404() throws Exception {
+    @Test @Order(3)
+    void getProductById_whenNotExists_returns404() throws Exception {
         mockMvc.perform(get("/api/products/INVALID_CODE"))
             .andExpect(status().isNotFound());
     }
 
-    @Test
-    void testSearchByProductLine_returnsResults() throws Exception {
-
-        mockMvc.perform(
-                get("/api/products/search/findByProductLineEntity_ProductLine")
-                    .param("productLine","Classic Cars")
-        )
+    @Test @Order(4)
+    void searchByProductLine_ClassicCars_returnsResults() throws Exception {
+        mockMvc.perform(get("/api/products/search/findByProductLineEntity_ProductLine?productLine=Classic%20Cars"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$._embedded.products").isArray())
             .andExpect(jsonPath("$._embedded.products.length()").value(greaterThan(0)));
     }
 
-    @Test
-    void testSearchByVendor_returnsResults() throws Exception {
-
-        mockMvc.perform(
-                get("/api/products/search/findByProductVendorIgnoreCase")
-                    .param("vendor","Min Lin Diecast")
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$._embedded.products").isArray());
-    }
-
-    @Test
-    void testSearchByScale_returnsResults() throws Exception {
-        mockMvc.perform(
-                get("/api/products/search/findByProductScale")
-                    .param("scale","1:18")
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$._embedded.products").isArray());
-    }
-
-    @Test
-    void testSearchByLowStock_returnsResults() throws Exception {
-        mockMvc.perform(
-                get("/api/products/search/findByQuantityInStockLessThan")
-                    .param("qty","500")
-        )
+    @Test @Order(5)
+    void searchByVendor_returnsResults() throws Exception {
+        mockMvc.perform(get("/api/products/search/findByProductVendorIgnoreCase?vendor=Min%20Lin%20Diecast"))
             .andExpect(status().isOk());
     }
 
-    @Test
-    void testPatchProduct_MSRP_returns204() throws Exception {
+    @Test @Order(6)
+    void searchByScale_returnsResults() throws Exception {
+        mockMvc.perform(get("/api/products/search/findByProductScale?scale=1:18"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$._embedded.products").isArray());
+    }
 
-        Map<String,String> patch = Map.of(
-            "MSRP","200.00"
-        );
+    @Test @Order(7)
+    void searchByLowStock_returnsResults() throws Exception {
+        mockMvc.perform(get("/api/products/search/findByQuantityInStockLessThan?qty=500"))
+            .andExpect(status().isOk());
+    }
 
-        mockMvc.perform(
-                patch("/api/products/S18_1749")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(patch))
-        )
-            .andExpect(status().isNoContent());
+    // ── PATCH (Update) ──────────────────────────────────────────────────────
+
+    /**
+     * PATCH returns 200 with body (spring.data.rest.return-body-on-update=true).
+     * Previously returned 204 No Content.
+     */
+    @Test @Order(20)
+    void patchProduct_buyPrice_returns200WithBody() throws Exception {
+        Map<String, String> patch = Map.of("buyPrice", "45.00");
+        mockMvc.perform(patch("/api/products/S18_1749")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(patch)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.productCode").value("S18_1749"));
+    }
+
+    @Test @Order(21)
+    void patchProduct_quantityInStock_returns200() throws Exception {
+        Map<String, Integer> patch = Map.of("quantityInStock", 900);
+        mockMvc.perform(patch("/api/products/S18_1749")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(patch)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.quantityInStock").value(900));
+    }
+
+    @Test @Order(22)
+    void patchProduct_nonExistent_returns404() throws Exception {
+        Map<String, String> patch = Map.of("productName", "Ghost");
+        mockMvc.perform(patch("/api/products/INVALID_CODE")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(patch)))
+            .andExpect(status().isNotFound());
     }
 }

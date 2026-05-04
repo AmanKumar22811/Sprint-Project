@@ -21,7 +21,7 @@ public class ProductLine {
     @Column(name = "htmlDescription", columnDefinition = "MEDIUMTEXT")
     private String htmlDescription;
 
-    @Column(name = "image")
+    @Column(name = "image", columnDefinition = "TEXT")
     private String imageUrl;
 
     @OneToMany(mappedBy = "productLineEntity", fetch = FetchType.LAZY)
@@ -46,7 +46,5 @@ public class ProductLine {
     public void setProducts(List<Product> products) { this.products = products; }
 
     @Override
-    public String toString() {
-        return "ProductLine{productLine='" + productLine + "'}";
-    }
+    public String toString() { return "ProductLine{productLine='" + productLine + "'}"; }
 }
