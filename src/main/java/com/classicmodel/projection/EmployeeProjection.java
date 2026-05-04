@@ -12,4 +12,11 @@ public interface EmployeeProjection {
     String getEmail();
     String getExtension();
     OfficeProjection getOffice();
+    ManagerExcerpt getManager();
+
+    interface ManagerExcerpt {
+        Integer getEmployeeNumber();
+        String getFirstName();
+        String getLastName();
+    }
 }
